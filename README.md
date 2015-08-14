@@ -1,5 +1,8 @@
 # AutoArchive
 ### config
+Put files in your project root directory, like this `YourProjectRootDirectory/AutoArchive/..`
+
+
 ```bash
 PROJECT_NAME="{project name}.xcodeproj"
 SCHEME="scheme name"
