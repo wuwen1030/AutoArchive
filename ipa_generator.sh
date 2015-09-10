@@ -14,11 +14,15 @@ PROJ_EXT=".xcodeproj"
 CURRENT_DATE=`date +%Y%m%d%H%M%S`
 CFG_FILE_NAME="config.cfg"
 
-# pull_from_repo_if_needed()
-# {
-#     echo "pulling ...."
-# }
-#
+pull_repo_if_needed()
+{
+    echo "Pull from remote ..."
+    if [[ $1 == 1 ]]; then
+        git pull --rebase
+    fi
+    git submodule update --remote
+}
+
 # param1: project name
 # param2: scheme
 # param3: archive path
@@ -45,24 +49,41 @@ xcodebuild_archive()
     | tee xcodebuild.log
 }
 
-# param1 : .app file path
-# param2 : ipa target path
-# param3 : .dSYM file path
-# param4 : target .dSYM file path
+# param1 : archive path
+# param2 : product name
+# param3 : ipa target path
 package_app()
 {
-    # 暂时不用签名 --sign $x --embed $y
-    xcrun -sdk iphoneos PackageApplication -v "$1/${PRODUCT_NAME}.app" -o $2
+    APP_PATH=$1/$2.xcarchive/Products/Applications/$2.app
+    DSYM_INPUT_PATH=$1/$2.xcarchive/dSYMs
+    WATCH_KIT_PATH=$1/$2.xcarchive/WatchKitSupport/WK
+
+    SLIM_IPA_PATH=$3/$2_slim.ipa
+    DSYM_ZIP_OUTPUT_PATH=$3/$2.dSYM.zip
+
+    # package
+    xcrun -sdk iphoneos PackageApplication -v ${APP_PATH} -o ${SLIM_IPA_PATH}
     if [ $? != 0 ]; then
         echo "archive failed!!!!!!!!!!!!!!!!"
         exit 110
     fi
 
+    # Add watch kit support
+    cd $3
+    unzip $2_slim.ipa
+    mkdir WatchKitSupport
+    cp ${WATCH_KIT_PATH} WatchKitSupport/WK
+    zip -qr $2.ipa Payload WatchKitSupport
+    # clear
+    rm $2_slim.ipa
+    rm -R WatchKitSupport
+    rm -R Payload
+
     # zipping dSYM
-    ( cd $3 ; zip -r -X $4 "${PRODUCT_NAME}.app.dSYM" )
+    ( cd ${DSYM_INPUT_PATH} ; zip -r -X ${DSYM_ZIP_OUTPUT_PATH} ${PRODUCT_NAME}.app.dSYM )
 }
 
-echo "Package beigin at ${CURRENT_DATE} ..."
+echo "Package begin at ${CURRENT_DATE} ..."
 
 # To project path
 CURRENT_WORK_DIR=`echo ${0%/*}`
@@ -78,32 +99,25 @@ PROJ_PATH=`pwd`
 # import config
 . "${SCRIPT_PATH}/${CFG_FILE_NAME}"
 
-# Build path
-# BUILD_DIR="${PROJ_PATH}/build"
-
 # Archive path
 ARCHIVE_PATH="${PROJ_PATH}/archive"
-PROJECT_BUILDDIR="${ARCHIVE_PATH}/${PRODUCT_NAME}.xcarchive/Products/Applications"
-APP_FILE_PATH="${ARCHIVE_PATH}/${PRODUCT_NAME}.xcarchive/Products/Applications"
-DSYM_INPUT_PATH="${ARCHIVE_PATH}/${PRODUCT_NAME}.xcarchive/dSYMs"
 
 # IPA path
-IPA_FOLDER="${PROJ_PATH}/output"
-IPA_PATH="${IPA_FOLDER}/${PRODUCT_NAME}.ipa"
-DSYM_ZIP_OUTPUT_PATH="${IPA_FOLDER}/${PRODUCT_NAME}.dSYM.zip"
+IPA_DIR="${PROJ_PATH}/output"
 
+# Update source code
+pull_repo_if_needed ${UPDATE_FIRST}
+
+# Build
 if [ "${USE_XCTOOL}" == "0" ];then
     xcodebuild_archive "${PROJECT_NAME}" "${SCHEME}" "${ARCHIVE_PATH}/${PRODUCT_NAME}"
-    # generate compile_commands.json
-    # oclint-xcodebuild xcodebuild.log
 else
     xctool_archive "${PROJECT_NAME}" "${SCHEME}" "${ARCHIVE_PATH}/${PRODUCT_NAME}"
 fi
 
-mkdir -p "${IPA_FOLDER}"
-
-# pakcage
-package_app "${APP_FILE_PATH}" "${IPA_PATH}" "${DSYM_INPUT_PATH}" "${DSYM_ZIP_OUTPUT_PATH}"
+# package
+mkdir -p "${IPA_DIR}"
+package_app "${ARCHIVE_PATH}" "${PRODUCT_NAME}" "${IPA_DIR}"
 
 BUILD_FINISH_DATE=`date +%Y%m%d%H%M%S`
 echo "Packaging finish at ${BUILD_FINISH_DATE}"
